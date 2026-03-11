@@ -42,14 +42,22 @@ podman build -t claude-dev -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
 
 # 7. Execução
 # Nota: Adicionei :U no volume do staging para o Podman ajustar o dono (User) dentro do container
-echo "Running..."
-podman run -it --rm \
-  --name "claude-$PROJECT_NAME" \
-  --hostname "claude-$PROJECT_NAME" \
-  -v "$PROJECT_ROOT:/workspace/$PROJECT_NAME:Z" \
-  -v "$STAGING_DIR:/root/.claude:Z,U" \
-  -v "$STAGING_DIR/CLAUDE.merged.md:/workspace/CLAUDE.md:Z" \
-  -v "$SCRIPT_DIR/deps/ralph/ralph.sh:/workspace/ralph.sh:Z" \
-  -e "HOME=/root" \
-  -w "/workspace" \
-  claude-dev /bin/bash
+CONTAINER_NAME="claude-$PROJECT_NAME"
+# Verifica se o container existe (mesmo que parado)
+if podman container exists "$CONTAINER_NAME"; then
+    echo "Reconectando ao container: $CONTAINER_NAME..."
+    podman start -ai "$CONTAINER_NAME"
+else
+    echo "Criando novo container persistente: $CONTAINER_NAME..."
+    # SEM --rm e SEM --replace (para evitar loops de deleção)
+    podman run -it \
+      --name "$CONTAINER_NAME" \
+      --hostname "$CONTAINER_NAME" \
+      -v "$PROJECT_ROOT:/workspace/$PROJECT_NAME:Z" \
+      -v "$STAGING_DIR:/root/.claude:Z,U" \
+      -v "$STAGING_DIR/CLAUDE.merged.md:/workspace/CLAUDE.md:Z" \
+      -v "$SCRIPT_DIR/deps/ralph/ralph.sh:/workspace/ralph.sh:Z" \
+      -e "HOME=/root" \
+      -w "/workspace" \
+      claude-dev /bin/bash
+fi
