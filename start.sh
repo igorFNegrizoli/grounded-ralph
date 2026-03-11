@@ -1,63 +1,61 @@
 #!/bin/bash
 
-# Caminhos Absolutos
+# Absolute paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT=$(pwd)
 PROJECT_NAME=$(basename "$PROJECT_ROOT")
-HOST_CLAUDE="$HOME/.claude"
 DEPS_RALPH_SKILLS="$SCRIPT_DIR/deps/ralph/skills"
-STAGING_DIR="/tmp/claude-staging-$PROJECT_NAME"
+DEPS_RALPH_CLAUDE_MD="$SCRIPT_DIR/deps/ralph/CLAUDE.md"
+PODMAN_SOCKET="/run/user/$UID/podman/podman.sock"
+DOCKER_MAPPING_ARGS=()
 
-echo "Configurando Ralph para: $PROJECT_NAME"
-
-# 1. Limpeza e Recriação do Staging
-rm -rf "$STAGING_DIR"
-mkdir -p "$STAGING_DIR/skills" "$STAGING_DIR/agents"
-
-# 2. Copiar Skills do Host (~/.claude/skills)
-if [ -d "$HOST_CLAUDE/skills" ]; then
-    echo "Copiando skills do host..."
-    cp -rP "$HOST_CLAUDE/skills/." "$STAGING_DIR/skills/"
+echo "Checking for Podman socket connection"
+# TODO: add the ossibility for the user to choose between total isolation (for insecure code sources) or docker access with prompt injection possibility from insecure code
+if [ -S "$PODMAN_SOCKET" ]; then
+    chmod 666 "$PODMAN_SOCKET"
+    DOCKER_MAPPING_ARGS=(
+        "-e" "DOCKER_HOST=unix:///run/user/1000/podman/podman.sock"
+        "-v" "$PODMAN_SOCKET:/run/user/1000/podman/podman.sock"
+    )
+    echo "Podman socket detected. Claude will have access to Docker/Compose"
+else
+    echo "WARNING: Podman Socket not detected at: $PODMAN_SOCKET"
+    echo "Claude will work normally and isolated, but wont be able to run or test containers"
+    echo "To turn it on run on your host: systemctl --user enable --now podman.socket"
+    echo ""
+    sleep 2
 fi
 
-# 3. Mesclar Skills do Projeto (ralph/skills) - SEM SOBRESCREVER as do host
-if [ -d "$DEPS_RALPH_SKILLS" ]; then
-    echo "Mesclando skills do Ralph..."
-    # Usamos 'cp -n' (no-clobber) para não deletar o que já está lá, ou apenas cp -r 
-    # para adicionar os novos arquivos de skill do ralph
-    cp -rP "$DEPS_RALPH_SKILLS/." "$STAGING_DIR/skills/"
-fi
+echo "Grounding Ralph with: $PROJECT_NAME"
 
-# 4. Copiar Agents do Host (~/.claude/agents)
-if [ -d "$HOST_CLAUDE/agents" ]; then
-    echo "Copiando agents do host..."
-    cp -rP "$HOST_CLAUDE/agents/." "$STAGING_DIR/agents/"
-fi
+# Build
+podman build -t grounded-ralph -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
 
-# 5. Gerar CLAUDE.md unificado
-cat "$PROJECT_ROOT/CLAUDE.md" "$SCRIPT_DIR/deps/ralph/CLAUDE.md" > "$STAGING_DIR/CLAUDE.merged.md" 2>/dev/null
-
-# 6. Build
-podman build -t claude-dev -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
-
-# 7. Execução
-# Nota: Adicionei :U no volume do staging para o Podman ajustar o dono (User) dentro do container
 CONTAINER_NAME="claude-$PROJECT_NAME"
-# Verifica se o container existe (mesmo que parado)
+
 if podman container exists "$CONTAINER_NAME"; then
-    echo "Reconectando ao container: $CONTAINER_NAME..."
+    echo "Reconnecting to container: $CONTAINER_NAME..."
     podman start -ai "$CONTAINER_NAME"
 else
-    echo "Criando novo container persistente: $CONTAINER_NAME..."
-    # SEM --rm e SEM --replace (para evitar loops de deleção)
+    echo "Creating new container: $CONTAINER_NAME..."
+    # 1. Include the podman socket mapping so claude can manage docker containers on the host
+    # 2. Maps project
+    # 3. Mounts the host .claude configs on the container lowercase z for multiple project container opene
+    # 4. Add Ralph skills to the workspace
+    # 5. CLAUDE.md: Copies the Ralph loop dep CLAUDE.md to the workspace root
+    # 6. Copies the ralph script
+
     podman run -it \
       --name "$CONTAINER_NAME" \
       --hostname "$CONTAINER_NAME" \
-      -v "$PROJECT_ROOT:/workspace/$PROJECT_NAME:Z" \
-      -v "$STAGING_DIR:/root/.claude:Z,U" \
-      -v "$STAGING_DIR/CLAUDE.merged.md:/workspace/CLAUDE.md:Z" \
-      -v "$SCRIPT_DIR/deps/ralph/ralph.sh:/workspace/ralph.sh:Z" \
+      --workdir "/workspace" \
       -e "HOME=/root" \
-      -w "/workspace" \
-      claude-dev /bin/bash
+      --security-opt label=disable \
+      "${DOCKER_MAPPING_ARGS[@]}" \
+      -v "$PROJECT_ROOT:/workspace/$PROJECT_NAME:Z" \
+      -v "$HOME/.claude:/root/.claude:z,U" \
+      -v "$DEPS_RALPH_SKILLS:/workspace/skills:U,Z" \
+      -v "$DEPS_RALPH_CLAUDE_MD:/workspace/CLAUDE.md:U,Z" \
+      -v "$SCRIPT_DIR/deps/ralph/ralph.sh:/workspace/ralph.sh:U,Z" \
+      grounded-ralph /bin/bash
 fi
