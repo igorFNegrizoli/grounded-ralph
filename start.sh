@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Argument parsing
+ISOLATED=false
+for arg in "$@"; do
+    case $arg in
+        --isolated)
+            ISOLATED=true
+            ;;
+        *)
+            echo "Unknown argument: $arg"
+            echo "Usage: $0 [--isolated]"
+            exit 1
+            ;;
+    esac
+done
+
 # Absolute paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT=$(pwd)
@@ -10,14 +25,16 @@ PODMAN_SOCKET="/run/user/$UID/podman/podman.sock"
 DOCKER_MAPPING_ARGS=()
 
 echo "Checking for Podman socket connection"
-# TODO: add the ossibility for the user to choose between total isolation (for insecure code sources) or docker access with prompt injection possibility from insecure code
-if [ -S "$PODMAN_SOCKET" ]; then
+
+if [ "$ISOLATED" = true ]; then
+    echo "FULLY ISOLATED MODE: Socket access disabled. Claude cannot manage containers."
+    echo "Use this mode for untrusted or external code sources."
+elif [ -S "$PODMAN_SOCKET" ]; then
     chmod 666 "$PODMAN_SOCKET"
     DOCKER_MAPPING_ARGS=(
         "-e" "DOCKER_HOST=unix:///run/user/1000/podman/podman.sock"
         "-v" "$PODMAN_SOCKET:/run/user/1000/podman/podman.sock"
     )
-    echo "Podman socket detected. Claude will have access to Docker/Compose"
 else
     echo "WARNING: Podman Socket not detected at: $PODMAN_SOCKET"
     echo "Claude will work normally and isolated, but wont be able to run or test containers"
@@ -34,10 +51,26 @@ podman build -t grounded-ralph -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
 CONTAINER_NAME="claude-$PROJECT_NAME"
 
 if podman container exists "$CONTAINER_NAME"; then
-    echo "Reconnecting to container: $CONTAINER_NAME..."
+    # Detect mode the container was created with
+    SOCKET_IN_CONTAINER=$(podman inspect "$CONTAINER_NAME" \
+        --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \
+        | grep -c "podman.sock")
+    if [ "$SOCKET_IN_CONTAINER" -gt 0 ]; then
+        echo "Reconnecting to: $CONTAINER_NAME (Socket mode - Claude can manage containers)"
+    else
+        echo "Reconnecting to: $CONTAINER_NAME (Full isolation mode - no container access)"
+    fi
     podman start -ai "$CONTAINER_NAME"
 else
-    echo "Creating new container: $CONTAINER_NAME..."
+    if [ "$ISOLATED" = true ]; then
+        echo "Creating new container: $CONTAINER_NAME (Fully isolated mode)"
+    else
+        echo "Creating new container: $CONTAINER_NAME (Socket mode - Claude can manage containers)"
+        echo "WARNING: Claude has access to your host's Podman socket."
+        echo "Only use this mode with trusted projects."
+        echo "For untrusted sources, use: $0 --isolated"
+    fi
+
     # 1. Include the podman socket mapping so claude can manage docker containers on the host
     # 2. Maps project
     # 3. Mounts the host .claude configs on the container lowercase z for multiple project container opene
