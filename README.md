@@ -8,25 +8,12 @@ Designed for immutable OS setups (Fedora Atomic, Silverblue, etc.) where Docker 
 
 ---
 
-## How it works
+## What this project provides
 
-```
-Host
-├── start.sh          — builds image, creates/reattaches container
-│
-Container (ralph-on-detention)
-├── Claude Code CLI   — the agent runtime
-├── /workspace/       — bind-mounted project code
-├── ralph.sh          — iterative loop runner
-│
-Ralph loop (per iteration)
-├── reads prd.json    — picks highest-priority story with passes=false
-├── implements story  — writes code, runs quality checks
-├── commits           — "feat: US-001 - [title]"
-└── updates prd.json  — sets passes=true, appends to progress.txt
-```
-
-Each Ralph iteration spawns a fresh Claude Code instance. State persists across iterations via git history, `prd.json`, and `progress.txt`.
+- A **Containerfile** that builds a Fedora-based image with Claude Code CLI, Docker CLI, `just`, Node.js, Python, and language servers pre-installed
+- A **`start.sh`** script that builds the image, creates or reattaches to a named container, and wires up all the necessary mounts
+- **Optional Podman socket passthrough** so the agent inside the container can run `docker build`, `docker compose up`, etc. on the host — or `--isolated` mode to disable it
+- The **Ralph loop** (`deps/ralph/`) is included as a submodule. See [`deps/ralph/`](deps/ralph/) for the loop runner, slash commands, and prd.json documentation.
 
 ---
 
@@ -47,8 +34,6 @@ systemctl --user enable --now podman.socket
 
 ## Usage
 
-### Start the container
-
 ```bash
 ./start.sh              # with Podman socket passthrough (auto-detected)
 ./start.sh --isolated   # no socket — agent cannot manage host containers
@@ -56,48 +41,7 @@ systemctl --user enable --now podman.socket
 
 If a container named `ralph-on-detention` already exists, the script reattaches to it. Otherwise it builds the image and creates a new one.
 
-### Inside the container
-
-```bash
-# Create a PRD using the /prd skill (Claude Code slash command)
-cd /workspace/my-project
-/prd "Add dark mode to the dashboard"
-
-# Convert markdown PRD to prd.json
-/ralph path/to/prd.md
-
-# Run the Ralph loop (default: 10 iterations, tool: amp)
-/workspace/ralph.sh --tool claude        # use Claude Code
-/workspace/ralph.sh --tool amp           # use Amp (default)
-/workspace/ralph.sh --tool claude 20     # 20 max iterations
-```
-
-Ralph exits `0` when all stories pass. Exits `1` if max iterations are reached without full completion.
-
----
-
-## prd.json format
-
-```json
-{
-  "project": "my-app",
-  "branchName": "ralph/dark-mode",
-  "description": "Add dark mode support",
-  "userStories": [
-    {
-      "id": "US-001",
-      "title": "Toggle button in navbar",
-      "description": "...",
-      "acceptanceCriteria": ["...", "..."],
-      "priority": 1,
-      "passes": false,
-      "notes": ""
-    }
-  ]
-}
-```
-
-`branchName` doubles as the archive key — when it changes between runs, the old `prd.json` and `progress.txt` are moved to `archive/YYYY-MM-DD-<branch>/` and the log resets.
+Once inside the container, see [`deps/ralph/README.md`](deps/ralph/README.md) for how to create a PRD, convert it to `prd.json`, and run the Ralph loop.
 
 ---
 
