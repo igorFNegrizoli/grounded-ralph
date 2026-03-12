@@ -43,10 +43,10 @@ else
     sleep 2
 fi
 
-echo "Grounding Ralph with: $PROJECT_NAME"
+echo "Isolating Ralph with: $PROJECT_NAME"
 
 # Build
-podman build -t grounded-ralph -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
+podman build -t ralph-on-detention -f "$SCRIPT_DIR/Containerfile" "$SCRIPT_DIR"
 
 CONTAINER_NAME="claude-$PROJECT_NAME"
 
@@ -78,6 +78,10 @@ else
     # 5. CLAUDE.md: Copies the Ralph loop dep CLAUDE.md to the workspace root
     # 6. Copies the ralph script
 
+    # Support for symlinks on the claude config
+    TMP_CLAUDE=$(mktemp -d)
+    cp -rL "$HOME/.claude/." "$TMP_CLAUDE/"
+
     podman run -it \
       --name "$CONTAINER_NAME" \
       --hostname "$CONTAINER_NAME" \
@@ -87,9 +91,9 @@ else
       "${DOCKER_MAPPING_ARGS[@]}" \
       -v "$HOME/.gitconfig:/root/.gitconfig:ro" \
       -v "$PROJECT_ROOT:/workspace/$PROJECT_NAME:Z" \
-      -v "$HOME/.claude:/root/.claude:z,U" \
+      -v "$TMP_CLAUDE:/root/.claude:z" \
       -v "$DEPS_RALPH_SKILLS:/workspace/skills:U,Z" \
       -v "$DEPS_RALPH_CLAUDE_MD:/workspace/CLAUDE.md:U,Z" \
       -v "$SCRIPT_DIR/deps/ralph/ralph.sh:/workspace/ralph.sh:U,Z" \
-      grounded-ralph /bin/bash
+      ralph-on-detention /bin/bash
 fi
