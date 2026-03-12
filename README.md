@@ -1,5 +1,7 @@
 # ralph-on-detention
 
+<img width="941" height="710" alt="image" src="https://github.com/user-attachments/assets/ecf7520c-1679-4671-9dc4-9fdf1dfe4ed6" />
+
 Runs the [Ralph autonomous coding loop](https://ghuntley.com/ralph/) inside an isolated Podman container, with optional pass-through to the host's Podman socket so the agent can manage application containers during development.
 
 Designed for immutable OS setups (Fedora Atomic, Silverblue, etc.) where Docker is replaced by Podman and tooling lives in containers.
