@@ -52,6 +52,7 @@ else
       -e "HOME=/root" \
       --security-opt label=disable \
       "${DOCKER_MAPPING_ARGS[@]}" \
+      -v "$HOME/.gitconfig:/root/.gitconfig:ro" \
       -v "$PROJECT_ROOT:/workspace/$PROJECT_NAME:Z" \
       -v "$HOME/.claude:/root/.claude:z,U" \
       -v "$DEPS_RALPH_SKILLS:/workspace/skills:U,Z" \
